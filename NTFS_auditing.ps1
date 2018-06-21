@@ -22,7 +22,7 @@
 
 #--------------------------------------------------------------------------------------------------------------------------------------------------
 
-Function Get-OrderedACLbyClient ($computer,$clients) {
+Function Get-OrderedACLbyClient ($computer,$keywords) {
 
     # Query all the open files from a certain computer
     $openfiles = openfiles /Query /S $computer /FO CSV /V | ConvertFrom-Csv
@@ -31,11 +31,11 @@ Function Get-OrderedACLbyClient ($computer,$clients) {
     $filtered = $openfiles | where {$_."Open File (Path\executable)" -like "*lanini01*"} | Select "Accessed By","Open Mode","Open File (Path\executable)"
 
 
-    foreach($client in $clients) {
+    foreach($keyword in $keywords) {
 
         write-host "=========I. showing list of paths for $client ====================================="
 
-        $client_filtered = $filtered | where {$_."Open File (Path\executable)" -like "*$client*"} 
+        $client_filtered = $filtered | where {$_."Open File (Path\executable)" -like "*$keyword*"} 
 
 
         # BEGIN SHOW PATHS
@@ -43,15 +43,17 @@ Function Get-OrderedACLbyClient ($computer,$clients) {
         $client_filtered | ft
 
         $users = $client_filtered | where {$_."Accessed By" -notlike "*admin*"} | select "Accessed By" -Unique
+
         $results = $null
+        
         # begin for lOOP
         foreach($user in $users."Accessed By") {
 
-            $results = Get-ADPrincipalGroupMembership $user | where {$_.name -like "*$client*"} | SELECT NAME
+            $results = Get-ADPrincipalGroupMembership $user | where {$_.name -like "*$keyword*"} | SELECT NAME
 
             if ($results -eq $null) {
                 write-host -ForegroundColor "Red" "===== II. Group Membership of $user";
-                 write-host -ForegroundColor "Red" "$user is not part of group $client"
+                 write-host -ForegroundColor "Red" "$user is not part of group $keyword"
                  $membership = (get-aduser $user | select Distinguishedname).Distinguishedname
                  #write-host $membership
      
@@ -70,3 +72,15 @@ Function Get-OrderedACLbyClient ($computer,$clients) {
 
 
 }
+
+#--------------------------------------------------------------------------------------------------------------------------------------------------
+
+ Function Get-ACLbyDepth ($path,$depth) {
+    # Get the path
+    $folderACLS = Get-childitem $path -recurse -depth $depth -Directory | % { $path1 = $_.fullname; Get-Acl $_.Fullname | % { $_.access | Add-Member -MemberType NoteProperty 'Path' -Value $path1 -passthru }}
+
+    # output the object
+    $folderACL
+
+ }
+ 
