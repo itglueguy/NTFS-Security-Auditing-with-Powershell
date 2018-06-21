@@ -1,5 +1,5 @@
 # NTFS-Security-Auditing-with-Powershell
-ntfs security auditing with powershell
+Similar to tools like Netwrix File Auditor and Varonis, you can get a feel for what type of NTFS Permissions you have on your shares
 
 Ex. Get-ACLbyDepth
 
