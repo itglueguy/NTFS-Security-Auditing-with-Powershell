@@ -22,13 +22,13 @@
 
 #--------------------------------------------------------------------------------------------------------------------------------------------------
 
-Function Get-OrderedACLbyClient ($computer,$keywords) {
+Function Get-OrderedACLbyKeyword ($computer,$keywords) {
 
     # Query all the open files from a certain computer
     $openfiles = openfiles /Query /S $computer /FO CSV /V | ConvertFrom-Csv
 
     # further Filter those files
-    $filtered = $openfiles | where {$_."Open File (Path\executable)" -like "*lanini01*"} | Select "Accessed By","Open Mode","Open File (Path\executable)"
+    $filtered = $openfiles | Select "Accessed By","Open Mode","Open File (Path\executable)"
 
 
     foreach($keyword in $keywords) {
@@ -42,7 +42,7 @@ Function Get-OrderedACLbyClient ($computer,$keywords) {
 
         $client_filtered | ft
 
-        $users = $client_filtered | where {$_."Accessed By" -notlike "*admin*"} | select "Accessed By" -Unique
+        $users = $client_filtered | select "Accessed By" -Unique
 
         $results = $null
         
@@ -75,12 +75,18 @@ Function Get-OrderedACLbyClient ($computer,$keywords) {
 
 #--------------------------------------------------------------------------------------------------------------------------------------------------
 
- Function Get-ACLbyDepth ($path,$depth) {
-    # Get the path
-    $folderACLS = Get-childitem $path -recurse -depth $depth -Directory | % { $path1 = $_.fullname; Get-Acl $_.Fullname | % { $_.access | Add-Member -MemberType NoteProperty 'Path' -Value $path1 -passthru }}
+ Function Get-ACLbyDepth ($paths,$depth) {
+    
+    $PathACLS = foreach($path in $paths) {
+        # Get the path
+        $folderACLS = Get-childitem $path -recurse -depth $depth -Directory | % { $path1 = $_.fullname; Get-Acl $_.Fullname | % { $_.access | Add-Member -MemberType NoteProperty 'Path' -Value $path1 -passthru }}
 
-    # output the object
-    $folderACL
+        # output the object
+        $folderACL
+    }
+
+    # output the result of the path ACLS
+    $PathACLS
 
  }
  
