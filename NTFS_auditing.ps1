@@ -24,49 +24,49 @@
 
 Function Get-OrderedACLbyClient ($computer,$clients) {
 
-# Query all the open files from a certain computer
-$openfiles = openfiles /Query /S $computer /FO CSV /V | ConvertFrom-Csv
+    # Query all the open files from a certain computer
+    $openfiles = openfiles /Query /S $computer /FO CSV /V | ConvertFrom-Csv
 
-# further Filter those files
-$filtered = $openfiles | where {$_."Open File (Path\executable)" -like "*lanini01*"} | Select "Accessed By","Open Mode","Open File (Path\executable)"
-
-
-foreach($client in $clients) {
-
-    write-host "=========I. showing list of paths for $client ====================================="
-
-    $client_filtered = $filtered | where {$_."Open File (Path\executable)" -like "*$client*"} 
+    # further Filter those files
+    $filtered = $openfiles | where {$_."Open File (Path\executable)" -like "*lanini01*"} | Select "Accessed By","Open Mode","Open File (Path\executable)"
 
 
-    # BEGIN SHOW PATHS
+    foreach($client in $clients) {
 
-    $client_filtered | ft
+        write-host "=========I. showing list of paths for $client ====================================="
 
-    $users = $client_filtered | where {$_."Accessed By" -notlike "*admin*"} | select "Accessed By" -Unique
-    $results = $null
-    # begin for lOOP
-    foreach($user in $users."Accessed By") {
+        $client_filtered = $filtered | where {$_."Open File (Path\executable)" -like "*$client*"} 
 
-        $results = Get-ADPrincipalGroupMembership $user | where {$_.name -like "*$client*"} | SELECT NAME
 
-        if ($results -eq $null) {
-            write-host -ForegroundColor "Red" "===== II. Group Membership of $user";
-             write-host -ForegroundColor "Red" "$user is not part of group $client"
-             $membership = (get-aduser $user | select Distinguishedname).Distinguishedname
-             #write-host $membership
+        # BEGIN SHOW PATHS
+
+        $client_filtered | ft
+
+        $users = $client_filtered | where {$_."Accessed By" -notlike "*admin*"} | select "Accessed By" -Unique
+        $results = $null
+        # begin for lOOP
+        foreach($user in $users."Accessed By") {
+
+            $results = Get-ADPrincipalGroupMembership $user | where {$_.name -like "*$client*"} | SELECT NAME
+
+            if ($results -eq $null) {
+                write-host -ForegroundColor "Red" "===== II. Group Membership of $user";
+                 write-host -ForegroundColor "Red" "$user is not part of group $client"
+                 $membership = (get-aduser $user | select Distinguishedname).Distinguishedname
+                 #write-host $membership
      
-             } else {
-                  <#write-host -ForegroundColor "Yellow" "== III. Group Membership of $user";#>
-                     ($results).Name | ft
-                     $membership = (get-aduser $user | select Distinguishedname).Distinguishedname
-             #write-host $membership
-                      }
+                 } else {
+                      <#write-host -ForegroundColor "Yellow" "== III. Group Membership of $user";#>
+                         ($results).Name | ft
+                         $membership = (get-aduser $user | select Distinguishedname).Distinguishedname
+                 #write-host $membership
+                          }
+
+        }
+        # END fOR LOOP
+        # end shOW PATHS
 
     }
-    # END fOR LOOP
-    # end shOW PATHS
-
-}
 
 
 }
