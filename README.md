@@ -21,9 +21,9 @@ ex. Get-AclfromWdinws -computer "Computer1" -depth 1
 
 #------------------------------
 
-Ex. Get-OrderedACLbyKeyword
+Ex. Get-ACLbyKeyword
 
 ex. Assuming your Folders follow a Group Name / Folder Name naming convention, this allows you to see if certain Users actually belong to
 certain Group from a certain share.
 
-Get-OrderedACLbyKeyword -computer "Computer1" -Keywords "Micorosoft","Cisco"
+Get-ACLbyKeyword -computer "Computer1" -Keywords "Micorosoft","Cisco"
