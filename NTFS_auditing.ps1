@@ -1,4 +1,24 @@
-﻿Function Get-AclfromWindows ($computer,$depth) {
+﻿
+# Checking if the NTFS Security Module has been installed
+
+if (!(Get-Module "NTFSSecurity")) {
+
+    write-host "Prompting to install the NTFS Security Module"
+
+    Install-Module -name "NTFSSecurity"
+}
+
+# checking if the ActiveDirectory Module has bene Loaded
+
+if (!(Get-Module "ActiveDirectory")) {
+
+    write-host "Active Directory Module is not installed...Please load the RSAT Tools for your Operating System"
+
+}
+
+#--------------------------------------------------------------------------------------------------------------------------------------------------
+
+Function Get-AclfromWindows ($computer,$depth) {
     
     # get all the valid share letters from the computer
     $shares = (get-WmiObject -class Win32_Share -computer $computer | where {$_.Name -like "*$*" -and $_.Name -ne "C$" -and $_.Name -ne "ADMIN$" -and $_.Name -ne "IPC$"} | select Name).Name
@@ -90,3 +110,17 @@ Function Get-OrderedACLbyKeyword ($computer,$keywords) {
 
  }
  
+ #--------------------------------------------------------------------------------------------------------------------------------------------------
+
+ Function Remove-ExplcitPermissions ($path) {
+
+    $fullpath = ((get-childitem "\\LANINIFPR12\ini$\Spot Traffic") | select FullName).FullName
+
+    foreach($path in $fullpath) {
+
+        Enable-NTFSAccessInheritance -path $path -RemoveExplicitAccessRules
+
+    }
+
+
+
