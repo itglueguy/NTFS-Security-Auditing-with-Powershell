@@ -157,12 +157,14 @@ Function Get-ACLbyKeyword ($computer,$volumefilter,$keywords) {
   Function Monitor-OpenFiles($computers,$iterations,$interval) {
 
     # Create the Temporary Folder if it does not exist
+    New-Item -ItemType Directory -Force -Path C:\temp | out-null
 
     for ($i = 1; $i -lt $iterations; $i++)
     { 
         foreach($computer in $computers) {
 
             # create the Computer specific Folder if it does not exist
+            New-Item -ItemType Directory -Force -Path "C:\temp\$computer" | out-null
 
             # Query all the open files from a certain computer
             $openfiles = openfiles /Query /S $computer /FO CSV /V | ConvertFrom-Csv
@@ -185,34 +187,37 @@ Function Get-ACLbyKeyword ($computer,$volumefilter,$keywords) {
         start-sleep -seconds $interval_seconds     
     }
 
+    # when done, create a master file
+    foreach($computer in $computers) {
+        # create the done directory
+        New-Item -ItemType Directory -Force -Path "C:\temp\$computer\done" | out-null
 
-    
-    
-    
-      for ($i = 1; $i -lt 400; $i++)
-    { 
-     # Query all the open files from a certain computer
-    $openfiles = openfiles /Query /S "sfofls02" /FO CSV /V | ConvertFrom-Csv
+        # get all the CSV files of that directory
+        $csvfiles = (get-childitem -path "c:\temp\$computer" -file | select Fullname).Fullname
 
-    # further Filter those files
-    $filtered = $openfiles | 
-    
-    Monitor
-    Select "Accessed By","Open Mode","Open File (Path\executable)"
+        # enumerate all the CSV files together
+        foreach($CSV in $CSVFiles) { 
+            if(Test-Path $CSV) { 
+         
+                $FileName = [System.IO.Path]::GetFileName($CSV) 
+                $temp = Import-CSV -Path $CSV | select *, @{Expression={$FileName};Label="FileName"} 
+                $Output += $temp 
+ 
+            } else { 
+                Write-Warning "$CSV : No such file found" 
+            } 
+ 
+        } 
+        $date_base = get-date -format MM-HH-mm
+        $master_path = -join("c:\temp\",$computer,"\done\master_",$computer,$date_base,".csv")
 
-    $date_base = get-date -format MM-HH-mm
+        $Output | select "Accessed By","Open Mode","Open File (Path\executable)" -unique | Export-Csv -Path $master_path -NoTypeInformation 
+        Write-Output "$OutputFile successfully created"
+        
+        #remove the old files
+        Remove-item -path "c:\temp\$computer\*.csv" -force
+         
 
-    $date_base1 = "c:\scripts\sfo_open\sfo_open_"
-
-    $fullpath = -join($date_base1,$date_base,".csv")
-
-    $filtered | export-csv $fullpath
-
-      
     }
-
-
-
-
 
   }
