@@ -18,6 +18,106 @@ if (!(Get-Module "ActiveDirectory")) {
 
 #--------------------------------------------------------------------------------------------------------------------------------------------------
 
+Function Remove-OSCSID
+{   
+<#
+		.SYNOPSIS
+		Function Remove-OSCSID is an advanced function which can reomve the orphaned SID from file/folders ACL.
+		.DESCRIPTION
+		Function Remove-OSCSID is an advanced function which can reomve the orphaned SID from file/folders ACL.
+		.PARAMETER Path
+		Indicates the path of the specified file or folder.
+		.PARAMETER Recurse
+		Indicates check the child items of the specified folder.
+		.EXAMPLE
+		Remove-OSCSID  -path C:\acls.txt
+		
+		Remove orphaned SIDs from C:\acls.txt
+		.EXAMPLE
+		Remove-OSCSID  -Path C:\test -Recurse
+		
+		Remove orphaned SIDs from all the files/folders ACL of C:\test
+		.LINK
+		Windows PowerShell Advanced Function
+		http://technet.microsoft.com/en-us/library/dd315326.aspx
+		.LINK
+		Get-Acl
+		http://technet.microsoft.com/en-us/library/hh849802.aspx
+		.LINK
+		Set-Acl
+		http://technet.microsoft.com/en-us/library/hh849810.aspx
+	#>
+
+	[CmdletBinding()]
+	Param
+	(
+		#Define parameters
+		[Parameter(Mandatory=$true,Position=1)]
+		[String]$Path,		
+		[Parameter(Mandatory=$false,Position=2)]
+		[Switch]$Recurse
+	)
+	#Try to get the object ,and define a flag to record the count of orphaned SIDs 
+    Try
+	{
+		if(Test-Path -Path $Path)
+		{ 
+			$count = 0
+			#If the object is a folder and the "-recurse" is chosen ,then get all of the folder childitem,meanwhile store the path into an array folders
+			if ($Recurse) 
+	    	{		
+		 		$folders = Get-ChildItem -Path $path -Recurse 
+		 		#For-Each loop to get the ACL in the folders and check the orphaned SIDs 
+		 		ForEach ($folder in $folders)
+				{
+		   			$PSPath = $folder.fullname 
+		   			DeleteSID($PSPath)	
+				}
+			}
+			else
+			#The object is a file or the "-recurse" is not chosen,check the orphaned SIDs .
+			{
+				$PSPath =$path
+				DeleteSID($PSPath)	
+			}	
+		}
+		else
+		{
+			Write-Error "The path is incorrect"
+		}
+	}	
+	catch
+	{
+	 	Write-Error $Error
+	}
+}
+
+Function DeleteSID([string]$path)
+{  
+  	try
+  	{
+   		#This function is used to delete the orphaned SID 
+   		$acl = Get-Acl -Path $Path
+   		foreach($acc in $acl.access )
+   		{
+   			$value = $acc.IdentityReference.Value
+   			if($value -match "S-1-5-*")
+   			{
+   				$ACL.RemoveAccessRule($acc) | Out-Null
+   				Set-Acl -Path $Path -AclObject $acl -ErrorAction Stop
+   				Write-Host "Remove SID: $value  form  $Path "
+   			}
+   		}
+  	}
+   	catch
+   	{
+   		Write-Error $Error
+   	}
+}
+
+
+#--------------------------------------------------------------------------------------------------------------------------------------------------
+
 Function Get-AclfromWindows ($computer,$depth) {
     
     # get all the valid share letters from the computer
@@ -47,12 +147,12 @@ Function Get-ACLbyKeyword ($computer,$volumefilter,$keywords) {
     $openfiles = openfiles /Query /S $computer /FO CSV /V | ConvertFrom-Csv
 
     # further Filter those files
-    $filtered = $openfiles | where {$_."Open File (Path\executable)" -like "*$volumefilter*"} | Select "Accessed By","Open Mode","Open File (Path\executable)"
+    $filtered = $openfiles | where {$_."Open File (Path\executable)" -like "*$volumefilter*" -and $_."Open Mode" -notlike "*No Access*"} | Select "Accessed By","Open Mode","Open File (Path\executable)"
 
 
     foreach($keyword in $keywords) {
 
-        write-host "=========I. showing list of paths for $client ====================================="
+        write-host "=========I. showing list of paths for $keyword ====================================="
 
         $client_filtered = $filtered | where {$_."Open File (Path\executable)" -like "*$keyword*"} 
 
@@ -77,7 +177,7 @@ Function Get-ACLbyKeyword ($computer,$volumefilter,$keywords) {
                  #write-host $membership
      
                  } else {
-                      <#write-host -ForegroundColor "Yellow" "== III. Group Membership of $user";#>
+                      write-host -ForegroundColor "Yellow" "== III. Group Membership of $user";
                          ($results).Name | ft
                          $membership = (get-aduser $user | select Distinguishedname).Distinguishedname
                  #write-host $membership
@@ -149,6 +249,14 @@ Function Get-ACLbyKeyword ($computer,$volumefilter,$keywords) {
     write-host "Identifying Directories with Everyone Permission"
     $format1  | where { $_.Identityreference -like "*Everyone*"} | ft
 
+    # users that have Everyone Permissions
+    
+    write-host "Identifying Directories with Creator Owner Permission"
+    $format1  | where { $_.Identityreference -like "*Creator Owner*"} | ft
+
+    write-host "Identifying Directories with Orphaned SID's"
+    $format1  | where { $_.Identityreference -like "*S-1-5*"} | ft
+
 
  }
 
@@ -170,7 +278,7 @@ Function Get-ACLbyKeyword ($computer,$volumefilter,$keywords) {
             $openfiles = openfiles /Query /S $computer /FO CSV /V | ConvertFrom-Csv
 
             # further Filter those files
-            $filtered = $openfiles | where {$_."Open File (Path\executable)" -like "*UMW*" -or $_."Open File (Path\executable)" -like "*UM Local*"} | Select "Accessed By","Open Mode","Open File (Path\executable)"
+            $filtered = $openfile | Select "Accessed By","Open Mode","Open File (Path\executable)"
 
             $date_base = get-date -format MM-HH-mm
 
