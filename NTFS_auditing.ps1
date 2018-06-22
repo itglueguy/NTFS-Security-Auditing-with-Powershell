@@ -309,27 +309,27 @@ Function Get-ACLbyKeyword ($computer,$volumefilter,$keywords) {
     $format1 = $inputobject | where {$_.path -notlike "*ser*"}
 
     # users that have full control that are not admins
-    write-host "Identifying Directories with Full Control that are not Admins or Service Accounts"
+    write-host -ForegroundColor green "Identifying Directories with Full Control that are not Admins or Service Accounts"
     $format1 | where {$_.FileSystemRights -eq "FullControl" -and $_.IdentityReference -notlike "*dmin*" -and $_.IdentityReference -notlike "*servic*" -and $_.IdentityReference -notlike "*system*" -and $_.IdentityReference -notlike "*owner*" -and $_.IdentityReference -notlike "*S-1-5*" -and $_.IdentityReference -notlike "*home*" -and $_.paht -notlike "*I$*"} | ft
 
     # All ou Groups ( a Whole OU is assigned to a particular Share
-    write-host "========== 1. Identifying Directories with Default all OU Users Groups"
+    write-host -ForegroundColor green "========== 1. Identifying Directories with Default all OU Users Groups"
     $format1 | where {$_.IdentityReference -like "*defaul*"} | ft
 
     # Domain Users Group
-    write-host "========== 2. Identifying Directories with Domain Users Permissions"
+    write-host -ForegroundColor green "========== 2. Identifying Directories with Domain Users Permissions"
     $format1  | where {$_.IdentityReference -like "*Domain Users*"} | ft
 
     # users that have Everyone Permissions
-    write-host "========== 3. Identifying Directories with Everyone Permission"
+    write-host -ForegroundColor green "========== 3. Identifying Directories with Everyone Permission"
     $format1  | where { $_.Identityreference -like "*Everyone*"} | ft
 
     # users that have Creator Owner Permissions
-    write-host "========== 4. Identifying Directories with Creator Owner Permission"
+    write-host -ForegroundColor green "========== 4. Identifying Directories with Creator Owner Permission"
     $format1  | where { $_.Identityreference -like "*Creator Owner*"} | ft
 
     # users that have Creator Owner Permissions
-    write-host "========== 5. Identifying Directories with Orphaned SID's"
+    write-host -ForegroundColor green "========== 5. Identifying Directories with Orphaned SID's"
     $format1  | where { $_.Identityreference -like "*S-1-5*"} | ft
 
 
