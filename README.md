@@ -1,5 +1,5 @@
 # NTFS-Security-Auditing-with-Powershell
-Similar to tools like Netwrix File Auditor and Varonis, you can get a feel for what type of NTFS Permissions you have on your shares
+Similar to tools like Netwrix File Auditor and Varonis, you can get a feel for what type of NTFS Permissions you have on your shares. Most of these scripts depend on the great NTFSSecurity Module
 
 Ex. Get-ACLbyDepth
 
