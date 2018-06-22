@@ -1,20 +1,28 @@
 ﻿
-# Checking if the NTFS Security Module has been installed
+    # Checking if the NTFS Security Module has been installed
 
-if (!(Get-Module "NTFSSecurity")) {
+    if (!(Get-Module "NTFSSecurity")) {
 
-    write-host "Prompting to install the NTFS Security Module"
+        write-host "Prompting to install the NTFS Security Module"
 
-    Install-Module -name "NTFSSecurity"
-}
+        Install-Module -name "NTFSSecurity"
+    }
 
-# checking if the ActiveDirectory Module has bene Loaded
+    # checking if the ActiveDirectory Module has beem Loaded
 
-if (!(Get-Module "ActiveDirectory")) {
+    if (!(Get-Module "ActiveDirectory")) {
 
-    write-host "Active Directory Module is not installed...Please load the RSAT Tools for your Operating System"
+        write-host "Active Directory Module is not installed...Please load the RSAT Tools for your Operating System"
 
-}
+    }
+
+    # checking if the DataOntap Module has beem Loaded
+
+    if (!(Get-Module "DataOntap")) {
+
+        write-host "Netapp DataOntp Module is not installed...Please load the Netapp Powershell Commandlets for your Operating System"
+
+    }
 
 #--------------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -141,6 +149,65 @@ Function Get-AclfromWindows ($computer,$depth) {
 
 #--------------------------------------------------------------------------------------------------------------------------------------------------
 
+Function Get-AclfromNetapp ($controller,$credential,$depth) {
+    <#
+
+    $username = "your username"
+    $password = "your password"
+    $SecurePassword = ConvertTo-SecureString $password -asplaintext -force 
+    $cred = New-Object System.Management.Automation.PSCredential $username,$SecurePassword
+
+    Requires the Netapp Powershell Commandlets to work properly
+    Requires the NTFS Security Module to work properly
+
+    #>
+
+    # Check the connection to the Controller in Question
+    Connect-NcController $controller -cred $credential | out-null
+
+    # get all valid Vservers from the given controoler
+    $vservers = (Get-Ncvserver | where {$_.VserverType -eq "data" -and $_.Vserver -notlike "*dr*" -and $_.State -eq "running"} | select Vserver).Vserver
+
+    # Curse as it helps with getting the Bad ACL's out with Powershell
+    $combined_results = foreach($vserver in $vservers) {
+
+        # filter it to the base shares only and no user folders
+        $shares = Get-NcCifsShare -VserverContext $vserver| where {$_.path -notlike "/*/*" -and $_.path -ne "/" -and $_.Sharename -notlike "*sers*" -and $_.Sharename -notlike "*pst*" -and $_.Sharename -notlike "*SER*"}
+
+        $all_results = foreach($share in $shares) {
+            # specif the subfields to a direct variable
+            $cifs_name = $share.CifsServer
+            $actual_share = $share.ShareName
+
+            # create the full share path name
+            $full_sharepath = -join("\\",$cifs_name,"\",$actual_share)
+
+            # attempt to filter out users
+            if ($full_sharepath -like "*ser*") {
+                 write-output "" | out-null 
+                 } else {
+
+                        $folders = Get-childitem $full_sharepath -recurse -depth $depth -Directory | % { $path1 = $_.fullname; Get-Acl $_.Fullname | % { $_.access | Add-Member -MemberType NoteProperty 'Path' -Value $path1 -passthru }}
+
+                        # the $folders object will then report all the fields to the $all_results object
+                        $folders
+
+                    }
+
+        }
+        # all results are than added on the $dang_results varilable
+        $all_results
+
+    }
+
+    # when done it will output the $dang_results object
+    $combined_results
+
+}
+
+#--------------------------------------------------------------------------------------------------------------------------------------------------
+
+
 Function Get-ACLbyKeyword ($computer,$volumefilter,$keywords) {
 
     # Query all the open files from a certain computer
@@ -159,9 +226,9 @@ Function Get-ACLbyKeyword ($computer,$volumefilter,$keywords) {
 
         # BEGIN SHOW PATHS
 
-        $client_filtered | ft
+        $client_filtered | sort-object "Accessed By" -descending | ft
 
-        $users = $client_filtered | select "Accessed By" -Unique
+        $users = $client_filtered | where {$_."Accessed By" -notlike "*admin*" -or $_."Accessed By" -notlike "*service*"} | select "Accessed By" -Unique
 
         $results = $null
         
@@ -173,6 +240,13 @@ Function Get-ACLbyKeyword ($computer,$volumefilter,$keywords) {
             if ($results -eq $null) {
                 write-host -ForegroundColor "Red" "===== II. Group Membership of $user";
                  write-host -ForegroundColor "Red" "$user is not part of group $keyword"
+
+                 # Create the Temporary Folder if it does not exist
+                 New-Item -ItemType Directory -Force -Path "C:\temp" | out-null
+
+                 # Add them to a .txt file
+                 Add-content -path "c:\temp\notingroup.txt" -Value "$user - not in group - $keyword"
+
                  $membership = (get-aduser $user | select Distinguishedname).Distinguishedname
                  #write-host $membership
      
@@ -187,8 +261,12 @@ Function Get-ACLbyKeyword ($computer,$volumefilter,$keywords) {
         # END fOR LOOP
         # end shOW PATHS
 
-    }
 
+    }
+        write-host "The following users are not in the intended groups"
+        $usernotingroup = get-content "c:\temp\notingroup.txt" | out-string
+        write-host -foregroundcolor "red" $usernotingroup
+        clear-content "c:\temp\notingroup.txt" -force
 
 }
 
@@ -213,7 +291,7 @@ Function Get-ACLbyKeyword ($computer,$volumefilter,$keywords) {
 
  Function Remove-ExplcitPermissions ($path) {
 
-    $fullpath = ((get-childitem "\\LANINIFPR12\ini$\Spot Traffic") | select FullName).FullName
+    $fullpath = ((get-childitem $path) | select FullName).FullName
 
     foreach($path in $fullpath) {
 
@@ -235,26 +313,23 @@ Function Get-ACLbyKeyword ($computer,$volumefilter,$keywords) {
     $format1 | where {$_.FileSystemRights -eq "FullControl" -and $_.IdentityReference -notlike "*dmin*" -and $_.IdentityReference -notlike "*servic*" -and $_.IdentityReference -notlike "*system*" -and $_.IdentityReference -notlike "*owner*" -and $_.IdentityReference -notlike "*S-1-5*" -and $_.IdentityReference -notlike "*home*" -and $_.paht -notlike "*I$*"} | ft
 
     # All ou Groups ( a Whole OU is assigned to a particular Share
-    
-    write-host "Identifying Directories with Default all OU Users Groups"
+    write-host "========== 1. Identifying Directories with Default all OU Users Groups"
     $format1 | where {$_.IdentityReference -like "*defaul*"} | ft
 
     # Domain Users Group
-
-    write-host "Identifying Directories with Domain Users Permissions"
+    write-host "========== 2. Identifying Directories with Domain Users Permissions"
     $format1  | where {$_.IdentityReference -like "*Domain Users*"} | ft
 
     # users that have Everyone Permissions
-    
-    write-host "Identifying Directories with Everyone Permission"
+    write-host "========== 3. Identifying Directories with Everyone Permission"
     $format1  | where { $_.Identityreference -like "*Everyone*"} | ft
 
-    # users that have Everyone Permissions
-    
-    write-host "Identifying Directories with Creator Owner Permission"
+    # users that have Creator Owner Permissions
+    write-host "========== 4. Identifying Directories with Creator Owner Permission"
     $format1  | where { $_.Identityreference -like "*Creator Owner*"} | ft
 
-    write-host "Identifying Directories with Orphaned SID's"
+    # users that have Creator Owner Permissions
+    write-host "========== 5. Identifying Directories with Orphaned SID's"
     $format1  | where { $_.Identityreference -like "*S-1-5*"} | ft
 
 
