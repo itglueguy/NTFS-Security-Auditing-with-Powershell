@@ -1,27 +1,34 @@
 ﻿
     # Checking if the NTFS Security Module has been installed
 
-  <#  if (!(Get-Module "NTFSSecurity")) {
-
+    if (!(Get-Module -name "NTFSSecurity")) {
+        write-output "" | out-null
+        
+    } else {
         write-host "Prompting to install the NTFS Security Module"
 
         Install-Module -name "NTFSSecurity"
-    } #>
+
+    }
 
     # checking if the ActiveDirectory Module has beem Loaded
 
-    if (!(Get-Module "ActiveDirectory")) {
+    if (!(Get-Module -name "ActiveDirectory")) {
+    write-output "" | out-null
+        
 
+    } else {
         write-host "Active Directory Module is not installed...Please load the RSAT Tools for your Operating System"
-
     }
 
     # checking if the DataOntap Module has beem Loaded
 
-    if (!(Get-Module "DataOntap")) {
+    if (!(Get-Module -name "DataONTAP")) {
+    write-output "" | out-null
+       
 
-        write-host "Netapp DataOntp Module is not installed...Please load the Netapp Powershell Commandlets for your Operating System"
-
+    } else {
+     write-host "Netapp DataOntp Module is not installed...Please load the Netapp Powershell Commandlets for your Operating System"
     }
 
 #--------------------------------------------------------------------------------------------------------------------------------------------------
@@ -95,7 +102,7 @@ Function Monitor-OpenFiles($computers,$iterations,$interval) {
 
   }
 
-  #--------------------------------------------------------------------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------------------------------------------------------
 #### 2. ACL Report - See which ACL's are currently on your shares up to a certain depth
 
 Function Get-AclfromWindows ($computer,$depth) {
@@ -207,10 +214,12 @@ Function Get-OpenACLbyKeyword ($computer,$volumefilter,$keywords) {
         # begin for lOOP
         foreach($user in $users."Accessed By") {
 
+            $results = $null
+
             $results = Get-ADPrincipalGroupMembership $user | where {$_.name -like "*$keyword*"} | SELECT NAME
 
             if ($results -eq $null) {
-                Write-Verbose"===== II. Group Membership of $user";
+                Write-Verbose "===== II. Group Membership of $user";
                 Write-host -ForegroundColor "Red" "$user is not part of group $keyword"
 
                 # Create the Temporary Folder if it does not exist
@@ -223,10 +232,22 @@ Function Get-OpenACLbyKeyword ($computer,$volumefilter,$keywords) {
                 Write-Verbose $membership
      
                  } else {
-                      Write-Verbose "== III. Group Membership of $user";
+                         Write-Verbose "== III. Group Membership of $user";
                          ($results).Name | ft
-                         $membership = (get-aduser $user | select Distinguishedname).Distinguishedname
-                 #write-host $membership
+                         $membership = get-aduser $user | select SamAccountName,Distinguishedname
+
+                         $username = $membership.SamAccountName
+                         $DN = $membership.DistinguishedName
+
+                         # Create the Temporary Folder if it does not exist
+                         New-Item -ItemType Directory -Force -Path C:\temp | out-null
+
+                         # create the Computer specific Folder if it does not exist
+                         New-Item -ItemType Directory -Force -Path "C:\temp\$computer" | out-null
+
+                         # Add values to the membership file
+                         Add-content -Path "c:\temp\$computer\members.txt" -value "$DN"
+
                           }
 
         }
@@ -235,10 +256,111 @@ Function Get-OpenACLbyKeyword ($computer,$volumefilter,$keywords) {
 
 
     }
-        write-host "The following users are not in the intended groups"
+        write-host ">>>>>>> The following users are not in the intended groups"
+        write-host "    "
         $usernotingroup = get-content "c:\temp\notingroup.txt" | out-string
         write-host -foregroundcolor "red" $usernotingroup
         clear-content "c:\temp\notingroup.txt" -force
+
+        write-host ">>>>>>> The following groups can be added to the read-only traverse group for: $computer"
+        write-host "    "
+        $groups = get-content "c:\temp\$computer\members.txt" | out-string
+
+        write-host $groups
+
+        clear-content "c:\temp\$computer\members.txt" -force
+
+}
+
+#--------------------------------------------------------------------------------------------------------------------------------------------------
+
+Function Get-OpenACLfromfilebyKeyword ($computer,$volumefilter,$keywords) {
+
+    # Query all the open files from a certain computer
+
+    $path = "c:\temp\$computer\done"
+
+    $filepath = (get-childitem $path | where {$_.LastWriteTime -gt (get-date).AddDays(-1)} | select Fullname).FullName
+
+    $openfiles = import-csv $filepath
+
+    # further Filter those files
+    $filtered = $openfiles | where {$_."Open File (Path\executable)" -like "*$volumefilter*" -and $_."Open Mode" -notlike "*No Access*"} | Select "Accessed By","Open Mode","Open File (Path\executable)"
+
+
+    foreach($keyword in $keywords) {
+
+        write-host "=========I. showing list of paths for $keyword ====================================="
+
+        $client_filtered = $filtered | where {$_."Open File (Path\executable)" -like "*$keyword*"} 
+
+
+        # BEGIN SHOW PATHS
+
+        $client_filtered | sort-object "Accessed By" -descending | ft
+
+        $users = $client_filtered | where {$_."Accessed By" -notlike "*admin*"} | select "Accessed By" -Unique
+
+        $results = $null
+        
+        # begin for lOOP
+        foreach($user in $users."Accessed By") {
+
+            $results = $null
+
+            $results = Get-ADPrincipalGroupMembership $user | where {$_.name -like "*$keyword*"} | SELECT NAME
+
+            if ($results -eq $null) {
+                Write-Verbose "===== II. Group Membership of $user";
+                Write-host -ForegroundColor "Red" "$user is not part of group $keyword"
+
+                # Create the Temporary Folder if it does not exist
+                New-Item -ItemType Directory -Force -Path "C:\temp" | out-null
+
+                # Add them to a .txt file
+                Add-content -path "c:\temp\notingroup.txt" -Value "$user - not in group - $keyword"
+
+                $membership = (get-aduser $user | select Distinguishedname).Distinguishedname
+                Write-Verbose $membership
+     
+                 } else {
+                         Write-Verbose "== III. Group Membership of $user";
+                         ($results).Name | ft
+                         $membership = get-aduser $user | select SamAccountName,Distinguishedname
+
+                         $username = $membership.SamAccountName
+                         $DN = $membership.DistinguishedName
+
+                         # Create the Temporary Folder if it does not exist
+                         New-Item -ItemType Directory -Force -Path C:\temp | out-null
+
+                         # create the Computer specific Folder if it does not exist
+                         New-Item -ItemType Directory -Force -Path "C:\temp\$computer" | out-null
+
+                         # Add values to the membership file
+                         Add-content -Path "c:\temp\$computer\members.txt" -value "$DN"
+
+                          }
+
+        }
+        # END fOR LOOP
+        # end shOW PATHS
+
+
+    }
+        write-host ">>>>>>> The following users are not in the intended groups"
+        write-host "    "
+        $usernotingroup = get-content "c:\temp\notingroup.txt" | out-string
+        write-host -foregroundcolor "red" $usernotingroup
+        clear-content "c:\temp\notingroup.txt" -force
+
+        write-host ">>>>>>> The following groups can be added to the read-only traverse group for: $computer"
+        write-host "    "
+        $groups = get-content "c:\temp\$computer\members.txt" | out-string
+
+        write-host $groups
+
+        clear-content "c:\temp\$computer\members.txt" -force
 
 }
 
@@ -259,7 +381,7 @@ Function Get-OpenACLbyKeyword ($computer,$volumefilter,$keywords) {
 
  }
  
- #--------------------------------------------------------------------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------------------------------------------------------
 
  Function Get-AclfromWinNetapp ($computers,$controller,$credential,$depth) {
 
@@ -287,111 +409,8 @@ Function Get-OpenACLbyKeyword ($computer,$volumefilter,$keywords) {
 
     }
 
-
 #--------------------------------------------------------------------------------------------------------------------------------------------------
 ##### Remediation Functions - remove Orphaned SID and Explicit Permissions
-
-
-Function Remove-OSCSID
-{   
-<#
-		.SYNOPSIS
-		Function Remove-OSCSID is an advanced function which can reomve the orphaned SID from file/folders ACL.
-		.DESCRIPTION
-		Function Remove-OSCSID is an advanced function which can reomve the orphaned SID from file/folders ACL.
-		.PARAMETER Path
-		Indicates the path of the specified file or folder.
-		.PARAMETER Recurse
-		Indicates check the child items of the specified folder.
-		.EXAMPLE
-		Remove-OSCSID  -path C:\acls.txt
-		
-		Remove orphaned SIDs from C:\acls.txt
-		.EXAMPLE
-		Remove-OSCSID  -Path C:\test -Recurse
-		
-		Remove orphaned SIDs from all the files/folders ACL of C:\test
-		.LINK
-		Windows PowerShell Advanced Function
-		http://technet.microsoft.com/en-us/library/dd315326.aspx
-		.LINK
-		Get-Acl
-		http://technet.microsoft.com/en-us/library/hh849802.aspx
-		.LINK
-		Set-Acl
-		http://technet.microsoft.com/en-us/library/hh849810.aspx
-	#>
-
-	[CmdletBinding()]
-	Param
-	(
-		#Define parameters
-		[Parameter(Mandatory=$true,Position=1)]
-		[String]$Path,		
-		[Parameter(Mandatory=$false,Position=2)]
-		[Switch]$Recurse
-	)
-	#Try to get the object ,and define a flag to record the count of orphaned SIDs 
-    Try
-	{
-		if(Test-Path -Path $Path)
-		{ 
-			$count = 0
-			#If the object is a folder and the "-recurse" is chosen ,then get all of the folder childitem,meanwhile store the path into an array folders
-			if ($Recurse) 
-	    	{		
-		 		$folders = Get-ChildItem -Path $path -Recurse 
-		 		#For-Each loop to get the ACL in the folders and check the orphaned SIDs 
-		 		ForEach ($folder in $folders)
-				{
-		   			$PSPath = $folder.fullname 
-		   			DeleteSID($PSPath)	
-				}
-			}
-			else
-			#The object is a file or the "-recurse" is not chosen,check the orphaned SIDs .
-			{
-				$PSPath =$path
-				DeleteSID($PSPath)	
-			}	
-		}
-		else
-		{
-			Write-Error "The path is incorrect"
-		}
-	}	
-	catch
-	{
-	 	Write-Error $Error
-	}
-}
-
-#--------------------------------------------------------------------------------------------------------------------------------------------------
-
-Function DeleteSID([string]$path)
-{  
-  	try
-  	{
-   		#This function is used to delete the orphaned SID 
-   		$acl = Get-Acl -Path $Path
-   		foreach($acc in $acl.access )
-   		{
-   			$value = $acc.IdentityReference.Value
-   			if($value -match "S-1-5-*")
-   			{
-   				$ACL.RemoveAccessRule($acc) | Out-Null
-   				Set-Acl -Path $Path -AclObject $acl -ErrorAction Stop
-   				Write-Host "Remove SID: $value  form  $Path "
-   			}
-   		}
-  	}
-   	catch
-   	{
-   		Write-Error $Error
-   	}
-}
-
-#--------------------------------------------------------------------------------------------------------------------------------------------------
 
  Function Remove-ExplcitPermissions ($path) {
 
@@ -419,7 +438,7 @@ Function DeleteSID([string]$path)
 
     # users that have full control that are not admins
     write-host -ForegroundColor red "========== 2. Identifying Directories with Full Control that are not Admins or Service Accounts"
-    $format1 | where {$_.FileSystemRights -eq "FullControl" -and $_.IdentityReference -notlike "*dmin*" -and $_.IdentityReference -notlike "*servic*" -and $_.IdentityReference -notlike "*system*" -and $_.IdentityReference -notlike "*owner*" -and $_.IdentityReference -notlike "*S-1-5*" -and $_.IdentityReference -notlike "*home*" -and $_.paht -notlike "*I$*"} | ft
+    $format1 | where {$_.FileSystemRights -eq "FullControl" -and $_.IdentityReference -notlike "*dmin*" -and $_.IdentityReference -notlike "*servic*" -and $_.IdentityReference -notlike "*system*" -and $_.IdentityReference -notlike "*owner*" -and $_.IdentityReference -notlike "*S-1-5*" -and $_.IdentityReference -notlike "*home*" -and $_.path -notlike "*I$*"} | ft
 
     # users that have Modify Permissions that are not admins
     write-host -ForegroundColor red "========== 3. Identifying Directories with Modify Permissions that are not Admins or Service Accounts"
@@ -448,6 +467,10 @@ Function DeleteSID([string]$path)
     # users with explicit permissions and is not inherited
     write-host -ForegroundColor red "========== 8. Identifying Directories with No inheritence"
     $format1  | where { $_.IsInherited -eq $false} | ft
+
+    # users with explicit permissions and is not inherited
+    write-host -ForegroundColor red "========== 8. Identifying Directories with Admins on them"
+    $format1  | where { $_.Identityreference -like "*admin" -or $_.Identityreference -like "*admin2"} | ft
 
 
  }
