@@ -1,35 +1,26 @@
-﻿
+﻿# import the NTFS Security Module as it does not load automatically
+Import-Module "NTFSSECURITY"
+
+
     # Checking if the NTFS Security Module has been installed
 
-    if (!(Get-Module -name "NTFSSecurity")) {
-        write-output "" | out-null
-        
-    } else {
-        write-host "Prompting to install the NTFS Security Module"
-
-        Install-Module -name "NTFSSecurity"
-
-    }
+    if (Get-Module -name "NTFSSecurity") { write-output "" | out-null} else {write-host "Prompting to install the NTFS Security Module"; Install-Module -name "NTFSSecurity"}
 
     # checking if the ActiveDirectory Module has beem Loaded
 
-    if (!(Get-Module -name "ActiveDirectory")) {
-    write-output "" | out-null
-        
-
-    } else {
-        write-host "Active Directory Module is not installed...Please load the RSAT Tools for your Operating System"
-    }
+    if (Get-Module -name "ActiveDirectory") {
+        write-output "" | out-null  
+        } else {
+            write-host "Active Directory Module is not installed...Please load the RSAT Tools for your Operating System"
+            }
 
     # checking if the DataOntap Module has beem Loaded
 
-    if (!(Get-Module -name "DataONTAP")) {
-    write-output "" | out-null
-       
-
-    } else {
-     write-host "Netapp DataOntp Module is not installed...Please load the Netapp Powershell Commandlets for your Operating System"
-    }
+    if (Get-Module -name "DataONTAP") {
+        write-output "" | out-null
+        } else {
+         write-host "Netapp DataOntp Module is not installed...Please load the Netapp Powershell Commandlets for your Operating System"
+        }
 
 #--------------------------------------------------------------------------------------------------------------------------------------------------
 #### 1. Monitoring Function - record what files get opened and record it over a certain period of time
@@ -116,7 +107,11 @@ Function Get-AclfromWindows ($computer,$depth) {
         # filter it to the base shares only and no user folders
         $full_share_path = -join("\\",$computer,"\",$share)
 
-        $folders5 = Get-childitem $full_share_path -recurse -depth $depth -Directory | % { $path1 = $_.fullname; Get-Acl $_.Fullname | % { $_.access | Add-Member -MemberType NoteProperty 'Path' -Value $path1 -passthru }}
+        if ($depth -eq 0) {
+            $folders5 = Get-item $full_share_path | % { $path1 = $_.fullname; Get-Acl $_.Fullname | % { $_.access | Add-Member -MemberType NoteProperty 'Path' -Value $path1 -passthru }}
+            } else {
+                $folders5 = Get-childitem $full_share_path -recurse -depth $depth -Directory | % { $path1 = $_.fullname; Get-Acl $_.Fullname | % { $_.access | Add-Member -MemberType NoteProperty 'Path' -Value $path1 -passthru }}
+                }
 
         # the $folders object will then report all the fields to the $all_results object
         $folders5
@@ -130,15 +125,12 @@ Function Get-AclfromWindows ($computer,$depth) {
 
 Function Get-AclfromNetapp ($controller,$computer,$credential,$depth) {
     <#
-
     $username = "your username"
     $password = "your password"
     $SecurePassword = ConvertTo-SecureString $password -asplaintext -force 
     $cred = New-Object System.Management.Automation.PSCredential $username,$SecurePassword
-
     Requires the Netapp Powershell Commandlets to work properly
     Requires the NTFS Security Module to work properly
-
     #>
 
     # Check the connection to the Controller in Question
@@ -151,7 +143,7 @@ Function Get-AclfromNetapp ($controller,$computer,$credential,$depth) {
     $combined_results = foreach($vserver in $vservers) {
 
         # filter it to the base shares only and no user folders
-        $shares = Get-NcCifsShare -VserverContext $vserver| where {$_.path -notlike "/*/*" -and $_.path -ne "/" -and $_.CifsServer -eq $computer}
+        $shares = Get-NcCifsShare -VserverContext $vserver | where {$_.path -notlike "/*/*" -and $_.path -ne "/" -and $_.CifsServer -eq $computer}
 
         $all_results = foreach($share in $shares) {
             # specif the subfields to a direct variable
@@ -160,13 +152,15 @@ Function Get-AclfromNetapp ($controller,$computer,$credential,$depth) {
 
             # create the full share path name
             $full_sharepath = -join("\\",$cifs_name,"\",$actual_share)
-
             # attempt to filter out users
             if ($full_sharepath -like "*ser*") {
                  write-output "" | out-null 
                  } else {
 
-                        $folders = Get-childitem $full_sharepath -recurse -depth $depth -Directory | % { $path1 = $_.fullname; Get-Acl $_.Fullname | % { $_.access | Add-Member -MemberType NoteProperty 'Path' -Value $path1 -passthru }}
+                        if ($depth -eq 0) { $folders = Get-item $full_sharepath | % { $path1 = $_.fullname; Get-Acl $_.Fullname | % { $_.access | Add-Member -MemberType NoteProperty 'Path' -Value $path1 -passthru }}
+
+                        } else { $folders = Get-childitem $full_sharepath -recurse -depth $depth -Directory | % { $path1 = $_.fullname; Get-Acl $_.Fullname | % { $_.access | Add-Member -MemberType NoteProperty 'Path' -Value $path1 -passthru }}
+                            }
 
                         # the $folders object will then report all the fields to the $all_results object
                         $folders
@@ -184,13 +178,31 @@ Function Get-AclfromNetapp ($controller,$computer,$credential,$depth) {
 
 }
 
+
 #--------------------------------------------------------------------------------------------------------------------------------------------------
 
 
-Function Get-OpenACLbyKeyword ($computer,$volumefilter,$keywords) {
+Function Get-OpenACLbyKeyword ($computer,$volumefilter,$keywords,$mode) {
 
-    # Query all the open files from a certain computer
-    $openfiles = openfiles /Query /S $computer /FO CSV /V | ConvertFrom-Csv
+    if ($mode -eq "file") {
+
+        clear-content "c:\temp\$computer\members.txt" -force
+
+        # Query all the open files from a certain computer
+
+        $path = "c:\temp\$computer\done"
+
+        $filepath = (get-childitem $path | where {$_.LastWriteTime -gt (get-date).AddDays(-1)} | select Fullname).FullName
+
+        $openfiles = import-csv $filepath
+
+        } else {
+
+        # Query all the open files from a certain computer
+        $openfiles = openfiles /Query /S $computer /FO CSV /V | ConvertFrom-Csv
+
+        }
+
 
     # further Filter those files
     $filtered = $openfiles | where {$_."Open File (Path\executable)" -like "*$volumefilter*" -and $_."Open Mode" -notlike "*No Access*"} | Select "Accessed By","Open Mode","Open File (Path\executable)"
@@ -276,6 +288,8 @@ Function Get-OpenACLbyKeyword ($computer,$volumefilter,$keywords) {
 
 Function Get-OpenACLfromfilebyKeyword ($computer,$volumefilter,$keywords) {
 
+    clear-content "c:\temp\$computer\members.txt" -force
+
     # Query all the open files from a certain computer
 
     $path = "c:\temp\$computer\done"
@@ -360,7 +374,7 @@ Function Get-OpenACLfromfilebyKeyword ($computer,$volumefilter,$keywords) {
 
         write-host $groups
 
-        clear-content "c:\temp\$computer\members.txt" -force
+        
 
 }
 
@@ -412,15 +426,18 @@ Function Get-OpenACLfromfilebyKeyword ($computer,$volumefilter,$keywords) {
 #--------------------------------------------------------------------------------------------------------------------------------------------------
 ##### Remediation Functions - remove Orphaned SID and Explicit Permissions
 
- Function Remove-ExplcitPermissions ($path) {
+Function Remove-OrphanedSID ($inputobject) {
 
-    $fullpath = ((get-childitem $path) | select FullName).FullName
+    # format the paths
+    $paths = ($inputobject | where {$_.identityreference -like "*S-1*"} | select Path).path
 
-    foreach($path in $fullpath) {
+    foreach($path in $paths) {
 
-        Enable-NTFSAccessInheritance -path $path -RemoveExplicitAccessRules
+        write-host "Removing orphaned SD for: $path"
+        get-childitem $path | Get-NTFSOrphanedAccess | Remove-NTFSAccess
 
     }
+
 
 }
 
@@ -433,11 +450,18 @@ Function Get-OpenACLfromfilebyKeyword ($computer,$volumefilter,$keywords) {
     $format1 = $inputobject | where {$_.path -notlike "*ser*"}
 
     # All Users whom have direct access to this share
-    write-host -ForegroundColor green "========== 1. Identifying All users that have access to this share"
-    $format1 | Select IdentityReference -unique | ft
+    write-host -ForegroundColor green "========== 1. Identifying All users and Groups that have access to this share"
+    write-host -foregroundcolor Yellow "========== Remediation: In General, ensure there are only groups on the shares"
+    write-host ">>showing users only"
+    $format1 | where {$_.identityreference -notlike "*S-1*" -and $_.identityreference -like "*.*"} | Select IdentityReference -unique | ft
+    write-host ">>showing Groups"
+    $format1 | where {$_.identityreference -notlike "*S-1*" -and $_.identityreference -notlike "*.*"} | Select IdentityReference -unique | ft
+    write-host ">>showing Orphaned SID's"
+    $format1 | where {$_.identityreference -like "*S-1*"} | Select IdentityReference -unique | ft
 
     # users that have full control that are not admins
     write-host -ForegroundColor red "========== 2. Identifying Directories with Full Control that are not Admins or Service Accounts"
+    write-host -foregroundcolor Yellow "========== Remediation: Change permissions for all non-admin users or groups to Modify or Read Only for most groups"
     $format1 | where {$_.FileSystemRights -eq "FullControl" -and $_.IdentityReference -notlike "*dmin*" -and $_.IdentityReference -notlike "*servic*" -and $_.IdentityReference -notlike "*system*" -and $_.IdentityReference -notlike "*owner*" -and $_.IdentityReference -notlike "*S-1-5*" -and $_.IdentityReference -notlike "*home*" -and $_.path -notlike "*I$*"} | ft
 
     # users that have Modify Permissions that are not admins
@@ -446,30 +470,36 @@ Function Get-OpenACLfromfilebyKeyword ($computer,$volumefilter,$keywords) {
     
     # All ou Groups ( a Whole OU is assigned to a particular Share
     write-host -ForegroundColor red "========== 4. Identifying Directories with Default all OU Users Groups"
+    write-host -foregroundcolor Yellow "========== Remediation: Use the Monitor-OpenFiles to command to model added permissions. Create a more refined Read Only Traverse Group"
     $format1 | where {$_.IdentityReference -like "*defaul*"} | ft
 
     # Domain Users Group
     write-host -ForegroundColor red "========== 5. Identifying Directories with Domain Users Permissions"
+    write-host -foregroundcolor Yellow "========== Remediation: Use the Monitor-OpenFiles to command to model added permissions. Remove Domain users once done"
     $format1  | where {$_.IdentityReference -like "*Domain Users*"} | ft
 
     # users that have Everyone Permissions
     write-host -ForegroundColor red "========== 6. Identifying Directories with Everyone Permission"
+    write-host -foregroundcolor Yellow "========== Remediation: Use the Monitor-OpenFiles to command to model added permissions. Remove the Everyone permission once done"
     $format1  | where { $_.Identityreference -like "*Everyone*"} | ft
 
     # users that have Creator Owner Permissions
     write-host -ForegroundColor red "========== 7. Identifying Directories with Creator Owner Permission"
+    write-host -foregroundcolor Yellow "========== Remediation: Use the Monitor-OpenFiles to command to model added permissions. Remove the creator owner permission once done"
     $format1  | where { $_.Identityreference -like "*Creator Owner*"} | ft
 
     # users that have Creator Owner Permissions
-    write-host -ForegroundColor red "========== 8. Identifying Directories with Orphaned SID's"
-    $format1  | where { $_.Identityreference -like "*S-1-5*"} | ft
+    write-host -ForegroundColor "red" "========== 8. Identifying Directories with Orphaned SID's"
+    write-host -foregroundcolor "Yellow" "Note: the Remove-OrphanedSID can be used to fix this issue"
+    $format1  | where { $_.Identityreference -like "*S-1-5*"} | select Path -unique | ft
 
     # users with explicit permissions and is not inherited
-    write-host -ForegroundColor red "========== 8. Identifying Directories with No inheritence"
+    write-host -ForegroundColor red "========== 9. Identifying Directories with No inheritence"
     $format1  | where { $_.IsInherited -eq $false} | ft
 
     # users with explicit permissions and is not inherited
-    write-host -ForegroundColor red "========== 8. Identifying Directories with Admins on them"
+    write-host -ForegroundColor red "========== 10. Identifying Directories with Admins on them"
+    write-host -foregroundcolor "Yellow" "Note: having admin permissions at the directory level is not best practice"
     $format1  | where { $_.Identityreference -like "*admin" -or $_.Identityreference -like "*admin2"} | ft
 
 
