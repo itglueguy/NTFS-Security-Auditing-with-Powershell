@@ -17,13 +17,13 @@ The purpose of this function is to get all the ACL's of all the Shares on a Wind
 
 Ex. Get all the ACL's from all the shares for all the folders under it. computer name of Computer1 and share name of share1
 
-ex. Get-AclfromWdinws -computer "Computer1" -depth 1
+ex. Get-AclfromWindows -computer "Computer1" -depth 1
 
 #------------------------------
 
-Ex. Get-ACLbyKeyword
+Ex. Get-OpenACLbyKeyword
 
 ex. Assuming your Folders follow a Group Name / Folder Name naming convention, this allows you to see if certain Users actually belong to
 certain Group from a certain share.
 
-Get-ACLbyKeyword -computer "Computer1" -Keywords "Micorosoft","Cisco"
+Get-ACLbyKeyword -computer "Computer1" -Keywords "Micorosoft","Cisco" -mode "RealTime"
