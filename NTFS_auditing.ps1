@@ -426,18 +426,49 @@ Function Get-OpenACLfromfilebyKeyword ($computer,$volumefilter,$keywords) {
 #--------------------------------------------------------------------------------------------------------------------------------------------------
 ##### Remediation Functions - remove Orphaned SID and Explicit Permissions
 
+function Get-ParentPath
+{
+    param
+    (
+        $Path
+    )
+
+    $Item = Get-Item -Path $Path
+    if ($Item.FullName -ne $Item.Root.FullName)
+    {
+        Get-ParentPath -Path $Item.Parent.FullName
+        
+        #Do stuff here... the below is included as an example
+        $Item.FullName
+    }
+    else
+    {
+        #This is the root of the drive, you can do stuff here too if needed.
+        $Item.FullName
+    }
+}
+
 Function Remove-OrphanedSID ($inputobject) {
 
-    # format the paths
-    $paths = ($inputobject | where {$_.identityreference -like "*S-1*"} | select Path).path
+    # format the inputobject
+    $paths = ($inputobject | where {$_.identityreference -like "*S-1*" -and $_.path -notlike "*aaa*"} | select Path).path
 
+    # iterate through the paths
     foreach($path in $paths) {
 
-        write-host "Removing orphaned SD for: $path"
-        get-childitem $path | Get-NTFSOrphanedAccess | Remove-NTFSAccess
+        write-host "removing orphaned sid for: $path"
+        $results = get-parentpath -Path $path
+
+        #iterate through parent paths to find the paths with inherited permissions
+        foreach($result in $results) {
+
+            write-host $result
+            write-host $result
+            get-childitem $result | Get-NTFSOrphanedAccess | Remove-NTFSAccess
+
+        }
 
     }
-
 
 }
 
