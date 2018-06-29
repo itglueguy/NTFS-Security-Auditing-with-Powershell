@@ -192,7 +192,7 @@ Function Get-OpenACLbyKeyword ($computer,$volumefilter,$keywords,$mode) {
 
         $path = "c:\temp\$computer\done"
 
-        $filepath = (get-childitem $path | where {$_.LastWriteTime -gt (get-date).AddDays(-1)} | select Fullname).FullName
+        $filepath = (get-childitem $path | Sort {$_.LastWriteTime} | select -last 1 | select Fullname).FullName
 
         $openfiles = import-csv $filepath
 
@@ -227,6 +227,8 @@ Function Get-OpenACLbyKeyword ($computer,$volumefilter,$keywords,$mode) {
         foreach($user in $users."Accessed By") {
 
             $results = $null
+
+            Add-content -Path "c:\temp\$computer\users.txt" -value $user
 
             $results = Get-ADPrincipalGroupMembership $user | where {$_.name -like "*$keyword*"} | SELECT NAME
 
@@ -281,100 +283,6 @@ Function Get-OpenACLbyKeyword ($computer,$volumefilter,$keywords,$mode) {
         write-host $groups
 
         clear-content "c:\temp\$computer\members.txt" -force
-
-}
-
-#--------------------------------------------------------------------------------------------------------------------------------------------------
-
-Function Get-OpenACLfromfilebyKeyword ($computer,$volumefilter,$keywords) {
-
-    clear-content "c:\temp\$computer\members.txt" -force
-
-    # Query all the open files from a certain computer
-
-    $path = "c:\temp\$computer\done"
-
-    $filepath = (get-childitem $path | where {$_.LastWriteTime -gt (get-date).AddDays(-1)} | select Fullname).FullName
-
-    $openfiles = import-csv $filepath
-
-    # further Filter those files
-    $filtered = $openfiles | where {$_."Open File (Path\executable)" -like "*$volumefilter*" -and $_."Open Mode" -notlike "*No Access*"} | Select "Accessed By","Open Mode","Open File (Path\executable)"
-
-
-    foreach($keyword in $keywords) {
-
-        write-host "=========I. showing list of paths for $keyword ====================================="
-
-        $client_filtered = $filtered | where {$_."Open File (Path\executable)" -like "*$keyword*"} 
-
-
-        # BEGIN SHOW PATHS
-
-        $client_filtered | sort-object "Accessed By" -descending | ft
-
-        $users = $client_filtered | where {$_."Accessed By" -notlike "*admin*"} | select "Accessed By" -Unique
-
-        $results = $null
-        
-        # begin for lOOP
-        foreach($user in $users."Accessed By") {
-
-            $results = $null
-
-            $results = Get-ADPrincipalGroupMembership $user | where {$_.name -like "*$keyword*"} | SELECT NAME
-
-            if ($results -eq $null) {
-                Write-Verbose "===== II. Group Membership of $user";
-                Write-host -ForegroundColor "Red" "$user is not part of group $keyword"
-
-                # Create the Temporary Folder if it does not exist
-                New-Item -ItemType Directory -Force -Path "C:\temp" | out-null
-
-                # Add them to a .txt file
-                Add-content -path "c:\temp\notingroup.txt" -Value "$user - not in group - $keyword"
-
-                $membership = (get-aduser $user | select Distinguishedname).Distinguishedname
-                Write-Verbose $membership
-     
-                 } else {
-                         Write-Verbose "== III. Group Membership of $user";
-                         ($results).Name | ft
-                         $membership = get-aduser $user | select SamAccountName,Distinguishedname
-
-                         $username = $membership.SamAccountName
-                         $DN = $membership.DistinguishedName
-
-                         # Create the Temporary Folder if it does not exist
-                         New-Item -ItemType Directory -Force -Path C:\temp | out-null
-
-                         # create the Computer specific Folder if it does not exist
-                         New-Item -ItemType Directory -Force -Path "C:\temp\$computer" | out-null
-
-                         # Add values to the membership file
-                         Add-content -Path "c:\temp\$computer\members.txt" -value "$DN"
-
-                          }
-
-        }
-        # END fOR LOOP
-        # end shOW PATHS
-
-
-    }
-        write-host ">>>>>>> The following users are not in the intended groups"
-        write-host "    "
-        $usernotingroup = get-content "c:\temp\notingroup.txt" | out-string
-        write-host -foregroundcolor "red" $usernotingroup
-        clear-content "c:\temp\notingroup.txt" -force
-
-        write-host ">>>>>>> The following groups can be added to the read-only traverse group for: $computer"
-        write-host "    "
-        $groups = get-content "c:\temp\$computer\members.txt" | out-string
-
-        write-host $groups
-
-        
 
 }
 
@@ -472,6 +380,34 @@ Function Remove-OrphanedSID ($inputobject) {
 
 }
 
+Function Get-RecursiveEffectivePerms ($paths,$users,$domain) {
+
+    $results = $null
+    $results = foreach($path in $paths) {
+
+        $results2 = foreach($user in $users) {
+
+            $full_user = -join("$domain\",$user)
+            #write-host $path
+            $results = get-parentpath -Path $path
+
+            foreach($result in $results) {
+
+            Get-NTFSEffectiveAccess -path $result -Account $full_user | select *
+
+            }
+
+        
+        }
+        $results2
+        
+    }
+
+    $results
+
+}
+
+
 #--------------------------------------------------------------------------------------------------------------------------------------------------
 ##### Reporting Functions - report on common groups that will cause compliance problems
 
@@ -537,3 +473,78 @@ Function Remove-OrphanedSID ($inputobject) {
  }
 
 #--------------------------------------------------------------------------------------------------------------------------------------------------
+
+Function Simulate-ACLChange ($source_path,$destination_path,$users,$domain,$removedgroup) {
+
+    # copy only the permissions
+    Get-acl $source_path | set-acl $destination_path
+
+    write-host "The Existing ACL of the Simulated Directory is:"
+
+    Get-ntfsaccess $source_path
+
+    write-host " "
+
+    write-host -ForegroundColor Green "Getting the Current Effective Permissions prior to removing $removedgroup"
+
+    # Get the Effective Permissions before removing a group
+    $old_effective = Get-RecursiveEffectivePerms -paths $destination_path -users $users -domain $domain
+    $old_effective | ft
+
+    # Remove the domain users group
+    Remove-NTFSAccess -Account $removedgroup -Path $destination_path -AccessRights "ReadAndExecute, Synchronize"
+
+    write-host -ForegroundColor Magenta "Getting the Simulated Effective Permissions after removing $removedgroup"
+
+    # check the effective permissions now
+    $new_effective = Get-RecursiveEffectivePerms -paths $destination_path -users $users -domain $domain
+    $new_effective | ft
+
+    $share_only_old = $old_effective | where {$_.Fullname -like "*$destination_path*"}
+    $share_only_new = $new_effective | where {$_.Fullname -like "*$destination_path*"}
+
+    write-host "Share specific chnages in Effective access due to removing $removedgroup group"
+    Write-host ">> old Effective"
+    $share_only_old | ft
+    Write-host ">> New Effective"
+    $share_only_new | ft
+
+        write-host "Change in Access Rights due to removing $removed group"
+    Write-host -ForegroundColor Cyan ">> old Effective"
+    $acl_old_modify = $share_only_old | where {$_.AccessRights -like "*Modify*"} |select Account,AccessRights
+
+    if ($acl_old_modify -ne $null) { $acl_old_modify | ft; $count = ($acl_old_modify).count; write-host "$count users have Modify permissions"} else {write-output "" | out-null }
+
+    $acl_old_Full = $share_only_old | where {$_.AccessRights -like "*Full*"} |select Account,AccessRights
+
+    if ($acl_old_Full -ne $null) { $acl_old_Full | ft; $count = ($acl_old_Full).count; write-host "$count users have Full Control permissions"} else {write-output "" | out-null }
+
+
+    $acl_old_read = $share_only_old | where {$_.AccessRights -like "*Read*"} |select Account,AccessRights
+
+    if ($acl_old_read -ne $null) { $acl_old_read | ft; $count = ($acl_old_read).count; write-host "$count users have Read only permissions"} else {write-output "" | out-null }
+
+    $acl_old_sync = $old_effective | where {$_.AccessRights -eq "Synchronize"} |select Account,AccessRights
+
+    if ($acl_old_sync -ne $null) { $acl_old_sync | ft; $count = ($acl_old_sync).count; write-host -ForegroundColor Red "$count users have NO Permission to this share"} else {write-output "" | out-null }
+    
+
+    Write-host -ForegroundColor DarkYellow ">> New Effective"
+    $acl_new_modify = $share_only_new | where {$_.AccessRights -like "*Modify*"} |  select Account,AccessRights
+
+    if ($acl_new_modify -ne $null) { $acl_old_modify | ft; $count = ($acl_old_modify).count; write-host "$count users have Modify permissions"} else {write-output "" | out-null }
+
+
+    $acl_new_Full = $share_only_new | where {$_.AccessRights -like "*Full*"} |  select Account,AccessRights
+
+    if ($acl_new_Full -ne $null) { $acl_old_Full | ft; $count = ($acl_new_Full).count; write-host "$count users have Full control permissions"} else {write-output "" | out-null }
+    
+
+    $acl_new_read = $share_only_new | where {$_.AccessRights -like "*Read*"} |  select Account,AccessRights
+
+    if ($acl_new_read -ne $null) { $acl_new_read | ft; $count = ($acl_new_read).count; write-host "$count users have Read permissions"} else {write-output "" | out-null }
+
+    $acl_new_sync = $new_effective | where {$_.AccessRights -eq "Synchronize"} |select Account,AccessRights
+
+    if ($acl_new_sync -ne $null) { $acl_new_sync | ft; $count = ($acl_new_sync).count; write-host -ForegroundColor Red "$count users have NO Permission to this share"} else {write-output "" | out-null }
+}
