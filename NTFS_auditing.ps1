@@ -8,7 +8,7 @@ Import-Module "NTFSSECURITY"
 
     # checking if the ActiveDirectory Module has beem Loaded
 
-    if (Get-Module -name "ActiveDirectory") {
+    if ((Get-Module -name "ActiveDirectory")) {
         write-output "" | out-null  
         } else {
             write-host "Active Directory Module is not installed...Please load the RSAT Tools for your Operating System"
@@ -23,9 +23,9 @@ Import-Module "NTFSSECURITY"
         }
 
 #--------------------------------------------------------------------------------------------------------------------------------------------------
-#### 1. Monitoring Function - record what files get opened and record it over a certain period of time
+#### 1. Monitoring Functions - record what files get opened by whom and record it over a certain period of time
 
-Function Monitor-OpenFiles($computers,$iterations,$interval) {
+Function Monitor-OpenFiles($computers,$iterations,[int]$interval) {
 
     # Create the Temporary Folder if it does not exist
     New-Item -ItemType Directory -Force -Path C:\temp | out-null
@@ -54,7 +54,7 @@ Function Monitor-OpenFiles($computers,$iterations,$interval) {
         }
         # sleep for a certain interval until the next interation
         
-        $interval_seconds = [int]$interval * 60  
+        $interval_seconds = $interval * 60  
         start-sleep -seconds $interval_seconds     
     }
 
@@ -94,7 +94,7 @@ Function Monitor-OpenFiles($computers,$iterations,$interval) {
   }
 
 #--------------------------------------------------------------------------------------------------------------------------------------------------
-#### 2. ACL Report - See which ACL's are currently on your shares up to a certain depth
+#### 2. ACL Report from Windows - See which ACL's are currently on your shares up to a certain depth
 
 Function Get-AclfromWindows ($computer,$depth) {
     
@@ -108,13 +108,15 @@ Function Get-AclfromWindows ($computer,$depth) {
         $full_share_path = -join("\\",$computer,"\",$share)
 
         if ($depth -eq 0) {
-            $folders5 = Get-item $full_share_path | % { $path1 = $_.fullname; Get-Acl $_.Fullname | % { $_.access | Add-Member -MemberType NoteProperty 'Path' -Value $path1 -passthru }}
+            Get-item $full_share_path | % { $path1 = $_.fullname; Get-Acl $_.Fullname | % { $_.access | Add-Member -MemberType NoteProperty 'Path' -Value $path1 -passthru }} | Select Path,FileSystemRights,AccessControlType,IdentityReference,IsInherited,InheritanceFlags,PropagationFlags,@{Name="Depth";Expression={write-output $depth}}
             } else {
-                $folders5 = Get-childitem $full_share_path -recurse -depth $depth -Directory | % { $path1 = $_.fullname; Get-Acl $_.Fullname | % { $_.access | Add-Member -MemberType NoteProperty 'Path' -Value $path1 -passthru }}
+                Get-item $full_share_path | % { $path1 = $_.fullname; Get-Acl $_.Fullname | % { $_.access | Add-Member -MemberType NoteProperty 'Path' -Value $path1 -passthru }} | Select Path,FileSystemRights,AccessControlType,IdentityReference,IsInherited,InheritanceFlags,PropagationFlags,@{Name="Depth";Expression={write-output "0"}}
+                Get-childitem $full_share_path -recurse -depth $depth -Directory | % { $path1 = $_.fullname; Get-Acl $_.Fullname | % { $_.access | Add-Member -MemberType NoteProperty 'Path' -Value $path1 -passthru }} | Select Path,FileSystemRights,AccessControlType,IdentityReference,IsInherited,InheritanceFlags,PropagationFlags,@{Name="Depth";Expression={write-output $depth}}
                 }
 
+
         # the $folders object will then report all the fields to the $all_results object
-        $folders5
+
                     }
     # when done it will output the $ACL_Results object
     write-output $ACLResults
@@ -122,6 +124,7 @@ Function Get-AclfromWindows ($computer,$depth) {
 }
 
 #--------------------------------------------------------------------------------------------------------------------------------------------------
+#### 3. ACL Report from Netapp - See which ACL's are currently on your shares up to a certain depth
 
 Function Get-AclfromNetapp ($controller,$computer,$credential,$depth) {
     <#
@@ -157,13 +160,16 @@ Function Get-AclfromNetapp ($controller,$computer,$credential,$depth) {
                  write-output "" | out-null 
                  } else {
 
-                        if ($depth -eq 0) { $folders = Get-item $full_sharepath | % { $path1 = $_.fullname; Get-Acl $_.Fullname | % { $_.access | Add-Member -MemberType NoteProperty 'Path' -Value $path1 -passthru }}
+                        if ($depth -eq 0) {Get-item $full_sharepath | % { $path1 = $_.fullname; Get-Acl $_.Fullname | % { $_.access | Add-Member -MemberType NoteProperty 'Path' -Value $path1 -passthru }} | Select Path,FileSystemRights,AccessControlType,IdentityReference,IsInherited,InheritanceFlags,PropagationFlags,@{Name="Depth";Expression={write-output $depth}}
 
-                        } else { $folders = Get-childitem $full_sharepath -recurse -depth $depth -Directory | % { $path1 = $_.fullname; Get-Acl $_.Fullname | % { $_.access | Add-Member -MemberType NoteProperty 'Path' -Value $path1 -passthru }}
+                        } else {
+                        
+                        Get-item $full_sharepath | % { $path1 = $_.fullname; Get-Acl $_.Fullname | % { $_.access | Add-Member -MemberType NoteProperty 'Path' -Value $path1 -passthru }} | Select Path,FileSystemRights,AccessControlType,IdentityReference,IsInherited,InheritanceFlags,PropagationFlags,@{Name="Depth";Expression={write-output "0"}}
+                        Get-childitem $full_sharepath -recurse -depth $depth -Directory | % { $path1 = $_.fullname; Get-Acl $_.Fullname | % { $_.access | Add-Member -MemberType NoteProperty 'Path' -Value $path1 -passthru }} | Select Path,FileSystemRights,AccessControlType,IdentityReference,IsInherited,InheritanceFlags,PropagationFlags,@{Name="Depth";Expression={write-output $depth}}
                             }
 
                         # the $folders object will then report all the fields to the $all_results object
-                        $folders
+
 
                     }
 
@@ -180,7 +186,7 @@ Function Get-AclfromNetapp ($controller,$computer,$credential,$depth) {
 
 
 #--------------------------------------------------------------------------------------------------------------------------------------------------
-
+#### 4. Open Files from Windows and Netapp - used to record what files are accessed, by whom, and to make recommendations about what users need to be added to groups
 
 Function Get-OpenACLbyKeyword ($computer,$volumefilter,$keywords,$mode) {
 
@@ -287,15 +293,19 @@ Function Get-OpenACLbyKeyword ($computer,$volumefilter,$keywords,$mode) {
 }
 
 #--------------------------------------------------------------------------------------------------------------------------------------------------
-
+#### 5. Gets the ACL by Depth for paths only
  Function Get-ACLbyDepth ($paths,$depth) {
     
     $PathACLS = foreach($path in $paths) {
         # Get the path
-        $folderACLS = Get-childitem $path -recurse -depth $depth -Directory | % { $path1 = $_.fullname; Get-Acl $_.Fullname | % { $_.access | Add-Member -MemberType NoteProperty 'Path' -Value $path1 -passthru }}
+        if ($depth -eq 0) { Get-item $path | % { $path1 = $_.fullname; Get-Acl $_.Fullname | % { $_.access | Add-Member -MemberType NoteProperty 'Path' -Value $path1 -passthru }} | Select Path,FileSystemRights,AccessControlType,IdentityReference,IsInherited,InheritanceFlags,PropagationFlags,@{Name="Depth";Expression={write-output $depth}}
+        } else {
+                Get-item $path | % { $path1 = $_.fullname; Get-Acl $_.Fullname | % { $_.access | Add-Member -MemberType NoteProperty 'Path' -Value $path1 -passthru }} | Select Path,FileSystemRights,AccessControlType,IdentityReference,IsInherited,InheritanceFlags,PropagationFlags,@{Name="Depth";Expression={write-output "0"}}
+                Get-childitem $path -recurse -depth $depth -Directory | % { $path1 = $_.fullname; Get-Acl $_.Fullname | % { $_.access | Add-Member -MemberType NoteProperty 'Path' -Value $path1 -passthru }} | Select Path,FileSystemRights,AccessControlType,IdentityReference,IsInherited,InheritanceFlags,PropagationFlags,@{Name="Depth";Expression={write-output $depth}}
+                }
 
         # output the object
-        $folderACLS
+
     }
 
     # output the result of the path ACLS
@@ -304,7 +314,7 @@ Function Get-OpenACLbyKeyword ($computer,$volumefilter,$keywords,$mode) {
  }
  
 #--------------------------------------------------------------------------------------------------------------------------------------------------
-
+#### 6. Gets the ACL from either Windows or Netapp based systems
  Function Get-AclfromWinNetapp ($computers,$controller,$credential,$depth) {
 
         $ACLResults = foreach($computer in $computers) {
@@ -407,6 +417,27 @@ Function Get-RecursiveEffectivePerms ($paths,$users,$domain) {
 
 }
 
+Function Get-EffectivePerms ($paths,$users,$domain) {
+
+    $results = foreach($path in $paths) {
+
+                $results2 = foreach($user in $users) {
+
+                            $full_user = -join("$domain\",$user)
+                            #write-host $path
+
+                            Get-NTFSEffectiveAccess -path $path -Account $full_user | select *
+
+                            }
+                $results2   
+                }
+
+    $results
+}
+
+
+
+
 
 #--------------------------------------------------------------------------------------------------------------------------------------------------
 ##### Reporting Functions - report on common groups that will cause compliance problems
@@ -418,7 +449,7 @@ Function Get-RecursiveEffectivePerms ($paths,$users,$domain) {
 
     # All Users whom have direct access to this share
     write-host -ForegroundColor green "========== 1. Identifying All users and Groups that have access to this share"
-    write-host -foregroundcolor Yellow "========== Remediation: In General, ensure there are only groups on the shares"
+
     write-host ">>showing users only"
     $format1 | where {$_.identityreference -notlike "*S-1*" -and $_.identityreference -like "*.*"} | Select IdentityReference -unique | ft
     write-host ">>showing Groups"
@@ -428,8 +459,8 @@ Function Get-RecursiveEffectivePerms ($paths,$users,$domain) {
 
     # users that have full control that are not admins
     write-host -ForegroundColor red "========== 2. Identifying Directories with Full Control that are not Admins or Service Accounts"
-    write-host -foregroundcolor Yellow "========== Remediation: Change permissions for all non-admin users or groups to Modify or Read Only for most groups"
-    $format1 | where {$_.FileSystemRights -eq "FullControl" -and $_.IdentityReference -notlike "*dmin*" -and $_.IdentityReference -notlike "*servic*" -and $_.IdentityReference -notlike "*system*" -and $_.IdentityReference -notlike "*owner*" -and $_.IdentityReference -notlike "*S-1-5*" -and $_.IdentityReference -notlike "*home*" -and $_.path -notlike "*I$*"} | ft
+
+    $format1 | where {$_.FileSystemRights -eq "FullControl" -and $_.IdentityReference -notlike "*dmin*" -and $_.IdentityReference -notlike "*servic*" -and $_.IdentityReference -notlike "*system*" -and $_.IdentityReference -notlike "*owner*" -and $_.IdentityReference -notlike "*S-1-5*" -and $_.IdentityReference -notlike "*home*" -and $_.path -notlike "*I$*"} | select *,@{Name="Remediation";Expression={write-output "Non Admin Full Control"}} | ft
 
     # users that have Modify Permissions that are not admins
     write-host -ForegroundColor red "========== 3. Identifying Directories with Modify Permissions that are not Admins or Service Accounts"
@@ -437,37 +468,37 @@ Function Get-RecursiveEffectivePerms ($paths,$users,$domain) {
     
     # All ou Groups ( a Whole OU is assigned to a particular Share
     write-host -ForegroundColor red "========== 4. Identifying Directories with Default all OU Users Groups"
-    write-host -foregroundcolor Yellow "========== Remediation: Use the Monitor-OpenFiles to command to model added permissions. Create a more refined Read Only Traverse Group"
+
     $format1 | where {$_.IdentityReference -like "*defaul*"} | ft
 
     # Domain Users Group
     write-host -ForegroundColor red "========== 5. Identifying Directories with Domain Users Permissions"
-    write-host -foregroundcolor Yellow "========== Remediation: Use the Monitor-OpenFiles to command to model added permissions. Remove Domain users once done"
+
     $format1  | where {$_.IdentityReference -like "*Domain Users*"} | ft
 
     # users that have Everyone Permissions
     write-host -ForegroundColor red "========== 6. Identifying Directories with Everyone Permission"
-    write-host -foregroundcolor Yellow "========== Remediation: Use the Monitor-OpenFiles to command to model added permissions. Remove the Everyone permission once done"
+
     $format1  | where { $_.Identityreference -like "*Everyone*"} | ft
 
     # users that have Creator Owner Permissions
     write-host -ForegroundColor red "========== 7. Identifying Directories with Creator Owner Permission"
-    write-host -foregroundcolor Yellow "========== Remediation: Use the Monitor-OpenFiles to command to model added permissions. Remove the creator owner permission once done"
+
     $format1  | where { $_.Identityreference -like "*Creator Owner*"} | ft
 
     # users that have Creator Owner Permissions
     write-host -ForegroundColor "red" "========== 8. Identifying Directories with Orphaned SID's"
-    write-host -foregroundcolor "Yellow" "Note: the Remove-OrphanedSID can be used to fix this issue"
+
     $format1  | where { $_.Identityreference -like "*S-1-5*"} | select Path -unique | ft
 
     # users with explicit permissions and is not inherited
     write-host -ForegroundColor red "========== 9. Identifying Directories with No inheritence"
-    $format1  | where { $_.IsInherited -eq $false} | ft
+    $format1  | where { $_.IsInherited -eq $false} | select *,@{Name="Remediation";Expression={write-output "Non Admin Full Control"}} | select *,@{Name="Remediation";Expression={write-output "9-Dirs no Inheritance"}} | ft
 
     # users with explicit permissions and is not inherited
     write-host -ForegroundColor red "========== 10. Identifying Directories with Admins on them"
-    write-host -foregroundcolor "Yellow" "Note: having admin permissions at the directory level is not best practice"
-    $format1  | where { $_.Identityreference -like "*admin" -or $_.Identityreference -like "*admin2"} | ft
+
+    $format1  | where { $_.Identityreference -like "*admin" -or $_.Identityreference -like "*admin2"} | select *,@{Name="Remediation";Expression={write-output "10-Admin on Directory"}} | ft
 
 
  }
@@ -488,7 +519,7 @@ Function Simulate-ACLChange ($source_path,$destination_path,$users,$domain,$remo
     write-host -ForegroundColor Green "Getting the Current Effective Permissions prior to removing $removedgroup"
 
     # Get the Effective Permissions before removing a group
-    $old_effective = Get-RecursiveEffectivePerms -paths $destination_path -users $users -domain $domain
+    $old_effective = Get-EffectivePerms -paths $destination_path -users $users -domain $domain | select AccountType,InheritanceEnabled,AccessControlType,AccessRights,Account,FullName,@{Name="Source_Directory";Expression={write-output $source_path}} | Select AccountType,InheritanceEnabled,AccessControlType,AccessRights,Account,Source_Directory 
     $old_effective | ft
 
     # Remove the domain users group
@@ -497,54 +528,50 @@ Function Simulate-ACLChange ($source_path,$destination_path,$users,$domain,$remo
     write-host -ForegroundColor Magenta "Getting the Simulated Effective Permissions after removing $removedgroup"
 
     # check the effective permissions now
-    $new_effective = Get-RecursiveEffectivePerms -paths $destination_path -users $users -domain $domain
+    $new_effective = Get-EffectivePerms -paths $destination_path -users $users -domain $domain | select AccountType,InheritanceEnabled,AccessControlType,AccessRights,Account,FullName,@{Name="Source_Directory";Expression={write-output $source_path}} | Select AccountType,InheritanceEnabled,AccessControlType,AccessRights,Account,Source_Directory 
     $new_effective | ft
 
-    $share_only_old = $old_effective | where {$_.Fullname -like "*$destination_path*"}
-    $share_only_new = $new_effective | where {$_.Fullname -like "*$destination_path*"}
+    $share_only_old = $old_effective
+    $share_only_new = $new_effective
 
-    write-host "Share specific chnages in Effective access due to removing $removedgroup group"
-    Write-host ">> old Effective"
-    $share_only_old | ft
-    Write-host ">> New Effective"
-    $share_only_new | ft
-
-        write-host "Change in Access Rights due to removing $removed group"
+    write-host "Change in Access Rights due to removing $removed group"
     Write-host -ForegroundColor Cyan ">> old Effective"
-    $acl_old_modify = $share_only_old | where {$_.AccessRights -like "*Modify*"} |select Account,AccessRights
+    
+        $acl_old_modify = $share_only_old | where {$_.AccessRights -like "*Modify*"} | select Account,AccessRights
 
-    if ($acl_old_modify -ne $null) { $acl_old_modify | ft; $count = ($acl_old_modify).count; write-host "$count users have Modify permissions"} else {write-output "" | out-null }
+        if ($acl_old_modify -ne $null) { <#$acl_old_modify | ft#>; $count = ($acl_old_modify).count; write-host "$count users have Modify permissions"} else {write-output "" | out-null }
 
-    $acl_old_Full = $share_only_old | where {$_.AccessRights -like "*Full*"} |select Account,AccessRights
+        $acl_old_Full = $share_only_old | where {$_.AccessRights -like "*Full*"} |select Account,AccessRights
 
-    if ($acl_old_Full -ne $null) { $acl_old_Full | ft; $count = ($acl_old_Full).count; write-host "$count users have Full Control permissions"} else {write-output "" | out-null }
+        if ($acl_old_Full -ne $null) { <#$acl_old_Full | ft #>; $count = ($acl_old_Full).count; write-host "$count users have Full Control permissions"} else {write-output "" | out-null }
 
 
-    $acl_old_read = $share_only_old | where {$_.AccessRights -like "*Read*"} |select Account,AccessRights
+        $acl_old_read = $share_only_old | where {$_.AccessRights -like "*Read*"} |select Account,AccessRights
 
-    if ($acl_old_read -ne $null) { $acl_old_read | ft; $count = ($acl_old_read).count; write-host "$count users have Read only permissions"} else {write-output "" | out-null }
+        if ($acl_old_read -ne $null) { <#$acl_old_read | ft #>; $count = ($acl_old_read).count; write-host "$count users have Read only permissions"} else {write-output "" | out-null }
 
-    $acl_old_sync = $old_effective | where {$_.AccessRights -eq "Synchronize"} |select Account,AccessRights
+        $acl_old_sync = $old_effective | where {$_.AccessRights -eq "Synchronize"} |select Account,AccessRights
 
-    if ($acl_old_sync -ne $null) { $acl_old_sync | ft; $count = ($acl_old_sync).count; write-host -ForegroundColor Red "$count users have NO Permission to this share"} else {write-output "" | out-null }
+        if ($acl_old_sync -ne $null) { <#$acl_old_sync | ft #>; $count = ($acl_old_sync).count; write-host -ForegroundColor Red "$count users have NO Permission to this share"} else {write-output "" | out-null }
     
 
     Write-host -ForegroundColor DarkYellow ">> New Effective"
-    $acl_new_modify = $share_only_new | where {$_.AccessRights -like "*Modify*"} |  select Account,AccessRights
+        
+        $acl_new_modify = $share_only_new | where {$_.AccessRights -like "*Modify*"} |  select Account,AccessRights
 
-    if ($acl_new_modify -ne $null) { $acl_old_modify | ft; $count = ($acl_old_modify).count; write-host "$count users have Modify permissions"} else {write-output "" | out-null }
+        if ($acl_new_modify -ne $null) { <#$acl_old_modify | ft #>; $count = ($acl_old_modify).count; write-host "$count users have Modify permissions"} else {write-output "" | out-null }
 
 
-    $acl_new_Full = $share_only_new | where {$_.AccessRights -like "*Full*"} |  select Account,AccessRights
+        $acl_new_Full = $share_only_new | where {$_.AccessRights -like "*Full*"} |  select Account,AccessRights
 
-    if ($acl_new_Full -ne $null) { $acl_old_Full | ft; $count = ($acl_new_Full).count; write-host "$count users have Full control permissions"} else {write-output "" | out-null }
+        if ($acl_new_Full -ne $null) { <#$acl_old_Full | ft #>; $count = ($acl_new_Full).count; write-host "$count users have Full control permissions"} else {write-output "" | out-null }
     
 
-    $acl_new_read = $share_only_new | where {$_.AccessRights -like "*Read*"} |  select Account,AccessRights
+        $acl_new_read = $share_only_new | where {$_.AccessRights -like "*Read*"} |  select Account,AccessRights
 
-    if ($acl_new_read -ne $null) { $acl_new_read | ft; $count = ($acl_new_read).count; write-host "$count users have Read permissions"} else {write-output "" | out-null }
+        if ($acl_new_read -ne $null) { <#$acl_new_read | ft #>; $count = ($acl_new_read).count; write-host "$count users have Read permissions"} else {write-output "" | out-null }
 
-    $acl_new_sync = $new_effective | where {$_.AccessRights -eq "Synchronize"} |select Account,AccessRights
+        $acl_new_sync = $new_effective | where {$_.AccessRights -eq "Synchronize"} |select Account,AccessRights
 
-    if ($acl_new_sync -ne $null) { $acl_new_sync | ft; $count = ($acl_new_sync).count; write-host -ForegroundColor Red "$count users have NO Permission to this share"} else {write-output "" | out-null }
+        if ($acl_new_sync -ne $null) { <#$acl_new_sync | ft #>; $count = ($acl_new_sync).count; write-host -ForegroundColor Red "$count users have NO Permission to this share"} else {write-output "" | out-null }
 }
