@@ -505,73 +505,54 @@ Function Get-EffectivePerms ($paths,$users,$domain) {
 
 #--------------------------------------------------------------------------------------------------------------------------------------------------
 
-Function Simulate-ACLChange ($source_path,$destination_path,$users,$domain,$removedgroup) {
+Function Simulate-ACLChange ($source_paths,$users,$domain,$removedgroup) {
 
-    # copy only the permissions
-    Get-acl $source_path | set-acl $destination_path
+    foreach($source_path in $source_paths) {
 
-    write-host "The Existing ACL of the Simulated Directory is:"
+            # copy only the permissions
+        Get-acl $source_path | set-acl $destination_path
 
-    Get-ntfsaccess $source_path
+        New-Item -Path "c:\temp\test" -itemtype "Directory" -force | out-null
 
-    write-host " "
+        $destination_path = "c:\temp\test"
 
-    write-host -ForegroundColor Green "Getting the Current Effective Permissions prior to removing $removedgroup"
+        write-host -ForegroundColor Green "The Existing ACL of the Directory [ $source_path ] is:"
 
-    # Get the Effective Permissions before removing a group
-    $old_effective = Get-EffectivePerms -paths $destination_path -users $users -domain $domain | select AccountType,InheritanceEnabled,AccessControlType,AccessRights,Account,FullName,@{Name="Source_Directory";Expression={write-output $source_path}} | Select AccountType,InheritanceEnabled,AccessControlType,AccessRights,Account,Source_Directory 
-    $old_effective | ft
+        Get-ntfsaccess $source_path | select FullName,InheritanceEnabled,InheritedFrom,AccessControlType,AccessRights,Account | ft -autosize
 
-    # Remove the domain users group
-    Remove-NTFSAccess -Account $removedgroup -Path $destination_path -AccessRights "ReadAndExecute, Synchronize"
+        write-host " "
 
-    write-host -ForegroundColor Magenta "Getting the Simulated Effective Permissions after removing $removedgroup"
+        write-host -ForegroundColor Green "Getting the Current Effective Permissions prior to removing $removedgroup :"
 
-    # check the effective permissions now
-    $new_effective = Get-EffectivePerms -paths $destination_path -users $users -domain $domain | select AccountType,InheritanceEnabled,AccessControlType,AccessRights,Account,FullName,@{Name="Source_Directory";Expression={write-output $source_path}} | Select AccountType,InheritanceEnabled,AccessControlType,AccessRights,Account,Source_Directory 
-    $new_effective | ft
+        # Get the Effective Permissions before removing a group
+        $old_effective = Get-EffectivePerms -paths $destination_path -users $users -domain $domain | select @{Name="Source_Directory";Expression={write-output $source_path}},AccountType,InheritanceEnabled,AccessControlType,AccessRights,Account
+        $old_effective | ft -AutoSize
 
-    $share_only_old = $old_effective
-    $share_only_new = $new_effective
+        # Remove the domain users group
+        #Remove-NTFSAccess -Account $removedgroup -Path $destination_path -AccessRights "ReadAndExecute, Synchronize"
+        Get-NTFSAccess -Account $removedgroup -path $destination_path | Remove-NTFSAccess
 
-    write-host "Change in Access Rights due to removing $removed group"
-    Write-host -ForegroundColor Cyan ">> old Effective"
+        write-host -ForegroundColor Magenta "Getting the Simulated Effective Permissions after removing $removedgroup"
+
+        # check the effective permissions now
+        $new_effective = Get-EffectivePerms -paths $destination_path -users $users -domain $domain | select @{Name="Source_Directory";Expression={write-output $source_path}},AccountType,InheritanceEnabled,AccessControlType,AccessRights,Account
+        $new_effective | ft -AutoSize
+
+            write-host "Change in Access Rights due to removing $removedgroup group"
     
-        $acl_old_modify = $share_only_old | where {$_.AccessRights -like "*Modify*"} | select Account,AccessRights
+            $old = $old_effective | group-object -Property AccessRights | Select Count,Name,@{Name="Permission_Count";Expression={write-output "Count_old_permissions"}}
 
-        if ($acl_old_modify -ne $null) { <#$acl_old_modify | ft#>; $count = ($acl_old_modify).count; write-host "$count users have Modify permissions"} else {write-output "" | out-null }
-
-        $acl_old_Full = $share_only_old | where {$_.AccessRights -like "*Full*"} |select Account,AccessRights
-
-        if ($acl_old_Full -ne $null) { <#$acl_old_Full | ft #>; $count = ($acl_old_Full).count; write-host "$count users have Full Control permissions"} else {write-output "" | out-null }
-
-
-        $acl_old_read = $share_only_old | where {$_.AccessRights -like "*Read*"} |select Account,AccessRights
-
-        if ($acl_old_read -ne $null) { <#$acl_old_read | ft #>; $count = ($acl_old_read).count; write-host "$count users have Read only permissions"} else {write-output "" | out-null }
-
-        $acl_old_sync = $old_effective | where {$_.AccessRights -eq "Synchronize"} |select Account,AccessRights
-
-        if ($acl_old_sync -ne $null) { <#$acl_old_sync | ft #>; $count = ($acl_old_sync).count; write-host -ForegroundColor Red "$count users have NO Permission to this share"} else {write-output "" | out-null }
-    
-
-    Write-host -ForegroundColor DarkYellow ">> New Effective"
+            $new = $new_effective | group-object -Property AccessRights | Select Count,Name,@{Name="Permission_Count";Expression={write-output "Count_new_permissions"}}
         
-        $acl_new_modify = $share_only_new | where {$_.AccessRights -like "*Modify*"} |  select Account,AccessRights
+            Write-host -ForegroundColor DarkYellow ">> Shows the Change in Effective Rights for: $source_path"
 
-        if ($acl_new_modify -ne $null) { <#$acl_old_modify | ft #>; $count = ($acl_old_modify).count; write-host "$count users have Modify permissions"} else {write-output "" | out-null }
+            ($old + $new) | Select @{Name="Source_Directory";Expression={write-output $source_path}},Permission_Count,Count,Name | Sort -Property Name -Descending | ft -AutoSize
 
+            $old_changes = (compare-object -referenceobject $old -differenceobject $new -Property Name | where {$_.SideIndicator -eq "<="} | select Name).Name
+            
+            $new_changes = (compare-object -referenceobject $old -differenceobject $new -Property Name | where {$_.SideIndicator -eq "=>"} | select Name).Name
 
-        $acl_new_Full = $share_only_new | where {$_.AccessRights -like "*Full*"} |  select Account,AccessRights
-
-        if ($acl_new_Full -ne $null) { <#$acl_old_Full | ft #>; $count = ($acl_new_Full).count; write-host "$count users have Full control permissions"} else {write-output "" | out-null }
-    
-
-        $acl_new_read = $share_only_new | where {$_.AccessRights -like "*Read*"} |  select Account,AccessRights
-
-        if ($acl_new_read -ne $null) { <#$acl_new_read | ft #>; $count = ($acl_new_read).count; write-host "$count users have Read permissions"} else {write-output "" | out-null }
-
-        $acl_new_sync = $new_effective | where {$_.AccessRights -eq "Synchronize"} |select Account,AccessRights
-
-        if ($acl_new_sync -ne $null) { <#$acl_new_sync | ft #>; $count = ($acl_new_sync).count; write-host -ForegroundColor Red "$count users have NO Permission to this share"} else {write-output "" | out-null }
+            write-host -ForegroundColor Red "permissions have changed from | $old_changes | permissions to | $new_changes | permissions when removing $removedgroup"
+    }
+      
 }
